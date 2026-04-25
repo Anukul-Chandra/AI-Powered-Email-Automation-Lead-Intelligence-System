@@ -1,0 +1,2739 @@
+{
+  "name": "My workflow 3",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "foldersToInclude": [
+            "YOUR_OUTLOOK_INBOX_FOLDER_ID"
+          ],
+          "readStatus": "unread"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4672,
+        688
+      ],
+      "id": "17c92357-a30e-4358-a22a-3f198232c264",
+      "name": "Microsoft Outlook Trigger1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "output": "raw",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        -4496,
+        688
+      ],
+      "id": "d6fa6f67-a02f-48e1-be0e-c73b4e78a406",
+      "name": "Get a message",
+      "webhookId": "YOUR_WEBHOOK_ID_1",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "OQHJbKGR7zUzhRir",
+          "name": "Tom Last"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// BATCH SPLIT — CRITICAL FOR MULTIPLE EMAILS\n// When Outlook Trigger picks up 4 emails at once,\n// this node splits them into individual items so each\n// email is processed independently, 1 by 1.\n// This prevents data mixing between different senders.\n// ============================================================\nconst items = $input.all();\n\nconst output = [];\n\nfor (const item of items) {\n  // Self-email filter\n  const myEmail = \"YOUR_ASSISTANT_EMAIL@YOUR_DOMAIN.com\";\n  const from = (item.json.from?.emailAddress?.address || \"\").toLowerCase();\n  if (from === myEmail.toLowerCase()) {\n    continue; // skip self-sent emails\n  }\n\n  // Push each email as a separate, isolated item\n  output.push({\n    json: { ...item.json }\n  });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4304,
+        688
+      ],
+      "id": "e325d5b1-2147-443c-8d63-c6f34b980275",
+      "name": "Batch Split — 1 Email Per Item"
+    },
+    {
+      "parameters": {
+        "functionCode": "const subject = $json.subject || \"\";\nconst isReply = subject.toLowerCase().startsWith(\"re:\");\nreturn [{ json: { ...$json, isReply } }];"
+      },
+      "id": "4b887450-72ba-4c74-909e-baa3f0f4c34b",
+      "name": "Detect Reply",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -3456,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isReply}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "64b21e14-e649-49f6-ae4a-f98fd7dc7443",
+      "name": "Is Reply?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -3264,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract data from REPLY email\nconst text = \n  (typeof $json.body === \"object\" ? $json.body.content : $json.body) ||\n  $json.bodyPreview ||\n  \"\";\nconst clean = text\n  .replace(/<[^>]+>/g, '\\n')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/\\r\\n/g, '\\n')\n  .replace(/\\r/g, '\\n');\n\nconst splitRegex = /\\nOn[\\s\\S]*?wrote:|\\nFrom:|\\nSent:|\\n---/i;\nconst parts = clean.split(splitRegex);\nconst message = parts[0].replace(/\\n{2,}/g, '\\n').trim();\nconst context = parts.length > 1 ? parts.slice(1).join(\"\\n\").trim().slice(0, 500) : \"\";\n\nconst invalidNames = [\"there\", \"team\", \"support\", \"sir\", \"madam\"];\nconst msgNameMatch = message.match(/(?:hi|hello|hey)\\s+([A-Za-z]+)/i);\nconst msgName = msgNameMatch?.[1]?.trim();\n\nconst name = $json.from?.emailAddress?.name ||\n  (!invalidNames.includes(msgName?.toLowerCase()) ? msgName : \"\") ||\n  \"there\";\n\nconst email = ($json.from?.emailAddress?.address || \"\").toLowerCase().trim();\n\nreturn [{\n  json: {\n    name,\n    email,\n    phone: \"Not provided\",\n    message,\n    context,\n    source: \"email\",\n    isReply: true,\n    intent_hint: \"reply_message\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2944,
+        560
+      ],
+      "id": "2cf1536d-7cd1-4990-96ca-2b7cf556e258",
+      "name": "Extract data when reply"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract data from NEW email\nconst text = \n  (typeof $json.body === \"object\" ? $json.body.content : $json.body) ||\n  $json.bodyPreview ||\n  \"\";\nconst clean = text\n  .replace(/<[^>]+>/g, '\\n')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/\\r\\n/g, '\\n')\n  .replace(/\\r/g, '\\n');\n\nconst name  = clean.match(/(?:Name|Full Name):\\s*(.+)/i)?.[1]?.trim() || $json.from?.emailAddress?.name || \"there\";\nconst email = (clean.match(/(?:E-?mail|E-Mail-Adresse):\\s*(.+)/i)?.[1]?.trim() || $json.from?.emailAddress?.address || \"\").toLowerCase().trim();\nconst phone = clean.match(/(?:Phone|Telefon|Telefonnummer|Tel):\\s*(.+)/i)?.[1]?.trim() || \"Not provided\";\n\nconst msgMatch = clean.match(/(?:Mes+age|Nachricht|Anliegen|Kommentar):\\s*([\\s\\S]+?)(?:\\n\\s*---|$)/i);\nconst message = msgMatch ? msgMatch[1].trim() : clean.trim();\n\nreturn [{\n  json: {\n    name,\n    email,\n    phone,\n    message,\n    context: \"\",\n    source: \"email\",\n    isReply: false,\n    intent_hint: \"new_lead\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2944,
+        768
+      ],
+      "id": "0b44e7c5-0a21-4468-96e8-fcead3635a08",
+      "name": "Extract data from new email"
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = ($json.message || $json.bodyPreview || \"\").toLowerCase();\nconst human = /(human|agent|speak to|talk to|real person)/.test(text);\nreturn [{ json: { ...$json, human_request: human } }];"
+      },
+      "id": "c04283e1-f05e-4472-9fec-57adafc4f297",
+      "name": "Detect Intent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -2720,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.human_request}}",
+              "value2": "={{ true }}"
+            }
+          ]
+        }
+      },
+      "id": "5a48d26a-1e6c-4f3b-94bc-0c9fd7478ae5",
+      "name": "Human or AI?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -2496,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "subject": "=🚨 Human Support Request - {{ $json.name }}",
+        "bodyContent": "=📩 New Human Support Request\n----------------------------\n👤 Name: {{ $json.name || 'Not Found' }}\n📧 Email: {{ $json.email || 'Not Found' }}\n📞 Phone: {{ $json.phone || 'Not Found' }}\n💬 Message: {{ $json.message || 'Not Found' }}\n----------------------------\n⚡ Sent automatically from AI system",
+        "toRecipients": "YOUR_ASSISTANT_EMAIL@YOUR_DOMAIN.com",
+        "additionalFields": {}
+      },
+      "id": "d7ca3404-8b50-4b19-9c6f-fee0f4390463",
+      "name": "Send to Human",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 1,
+      "position": [
+        -2208,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{\n  json: {\n    name: $json.name || \"User\",\n    email: ($json.email || \"\").toLowerCase().trim(),\n    phone: $json.phone || \"Not provided\",\n    message: $json.message || \"\",\n    context: $json.context || \"\",\n    source: $json.source || \"email\",\n    isReply: $json.isReply || false,\n    intent_hint: $json.intent_hint || \"new_lead\"\n  }\n}];"
+      },
+      "id": "64311579-2fc0-44cd-967a-ee66c570d0b2",
+      "name": "Normalize Email (New)1",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -2496,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1a",
+              "name": "Name",
+              "value": "={{ $json.name || $json.Name || 'Unknown' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1b",
+              "name": "Phone",
+              "value": "={{ $json.phone || $json.Phone || 'Not Provided' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1c",
+              "name": "Email",
+              "value": "={{ $json.email || $json.Email || 'noemail@unknown.com' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1d",
+              "name": "Message",
+              "value": "={{ $json.message || $json.Message || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1e",
+              "name": "Meeting_Time",
+              "value": "={{ ($json.Meeting_Time || $json.meeting_time || '').trim() || 'Not provided' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1f",
+              "name": "Company Name ",
+              "value": "={{ ($json.company || $json['Company Name'] || '').trim() || 'Not provided' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1g",
+              "name": "Context",
+              "value": "={{ $json.isReply ? ($json.context || 'No previous context') : 'New email' }}",
+              "type": "string"
+            },
+            {
+              "id": "f1h",
+              "name": "intent_hint",
+              "value": "={{ $json.isReply ? 'reply_message' : 'new_email' }}",
+              "type": "string"
+            },
+            {
+              "id": "723f469d-cfdb-497e-9829-1681ddb7f43d",
+              "name": "M_Id",
+              "value": "={{ $('Get a message').item.json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -2240,
+        672
+      ],
+      "id": "20e7b67d-2532-4cbe-937d-44251622f9ec",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a professional email & meeting assistant.\n\nName: {{ $json.Name }}\nPhone: {{ $json.Phone }}\nEmail: {{ $json.Email }}\nMessage: {{ $json.Message }}\nPrevious Context: {{ $json.Context }}\nMessage Type: {{ $json.intent_hint }}\n\nSummarize the user's request in 1-2 sentences. Be concise and professional. Return ONLY the summary.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -2016,
+        672
+      ],
+      "id": "e6a1987f-9a95-42d7-8a19-cebc805fb329",
+      "name": "AI Summary Generator"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -1824,
+        800
+      ],
+      "id": "8d9a8d75-5771-45ea-9a2f-9ca618ed082e",
+      "name": "OpenAI Chat Model9"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a smart routing assistant for YOUR_COMPANY_NAME.\n\nUser Name: {{ $('Edit Fields1').item.json.Name }}\nUser Email: {{ $('Edit Fields1').item.json.Email }}\nUser Message: {{ $('Edit Fields1').item.json.Message }}\nMeeting Time: {{ $('Edit Fields1').item.json.Meeting_Time }}\nPrevious Context: {{ $('Edit Fields1').item.json.Context }}\nMessage Type: {{ $('Edit Fields1').item.json.intent_hint }}\n\nPRIORITY: Sales is DEFAULT. Route elsewhere ONLY if clearly and explicitly about another department.\n\nDepartments:\n- Sales (DEFAULT — pricing, demos, interest, general inquiries, unclear messages)\n- Admin (internal office admin, HR, access requests only)\n- Accounting (invoices, payments, billing, refunds only)\n- COO (operations, process improvements only)\n- CEO (executive strategy, investment, board-level only)\n- Customer Care (existing customer complaints, technical help only)\n\nCONTEXT RULE: If Message Type is reply_message, use Previous Context to understand intent before routing.\n\nReturn ONLY this JSON — no explanation:\n{\n  \"Name\": \"{{ $('Edit Fields1').item.json.Name }}\",\n  \"Phone\": \"{{ $('Edit Fields1').item.json.Phone }}\",\n  \"Email\": \"{{ $('Edit Fields1').item.json.Email }}\",\n  \"Message\": \"{{ $('Edit Fields1').item.json.Message }}\",\n  \"Meeting_Time\": \"{{ $('Edit Fields1').item.json.Meeting_Time }}\",\n  \"Previous Context\": \"{{ $('Edit Fields1').item.json.Context }}\",\n  \"Message Type\": \"{{ $('Edit Fields1').item.json.intent_hint }}\",\n  \"text\": \"<Department Name>\",\n  \"actual_department\": \"<Department Name>\"\n}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -1680,
+        672
+      ],
+      "id": "216ece7b-42bc-4aa7-8a4d-f3519f92f74b",
+      "name": "AI Routing Department"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -1472,
+        784
+      ],
+      "id": "42c4b53c-ec61-4530-8f08-b7a3938343e7",
+      "name": "OpenAI Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfor (const item of items) {\n  let raw = item.json.text || \"\";\n\n  const extract = (key) => {\n    const regex = new RegExp(`\"${key}\"\\\\s*(?:\\\\\\\\?|\\\\\\\\n|[:\\\\s])*\"(?:\\\\s*:\\\\s*)?(.*?)(?:\"|\\\\\\\\\")`, 'i');\n    const match = raw.match(regex);\n    if (match) {\n      return match[1].replace(/\\\\n/g, ' ').replace(/\\\\\"/g, '').replace(/^[:\\s-]+/, '').trim();\n    }\n    return \"\";\n  };\n\n  try {\n    const name = extract(\"Name\");\n    const phone = extract(\"Phone\");\n    const email = extract(\"Email\");\n    const message = extract(\"Message\");\n    const companyName = extract(\"Company Name\") || extract(\"company\");\n    const meetingTime = extract(\"Meeting_Time\");\n    const text = extract(\"text\");\n    const actualDeptRaw = extract(\"actual_department\");\n    const context = extract(\"Previous Context\") || extract(\"Context\");\n    const intentHint = extract(\"Message Type\") || extract(\"intent_hint\");\n\n    const M_id = $('Get a message').item.json.id;\n\n    const query = (message || text || \"\").toLowerCase();\n    let amount = 0;\n    let day = \"\";\n\n    const moneyMatch = query.match(/(?:\\$|usd|tk|taka)?\\s*(\\d+)/i);\n    if (moneyMatch) amount = parseInt(moneyMatch[1]);\n    if (/today/i.test(query)) day = \"Today\";\n    else if (/tomorrow/i.test(query)) day = \"Tomorrow\";\n\n    let actualDepartment = actualDeptRaw || \"Sales\";\n    if (/support|problem|issue/i.test(query)) actualDepartment = \"Customer Care\";\n    else if (/account|billing|payment/i.test(query)) actualDepartment = \"Accounting\";\n    else if (/ceo|founder/i.test(query)) actualDepartment = \"CEO\";\n\n    item.json = {\n      Name: name,\n      Phone: phone,\n      Email: email,\n      Message: message,\n      Company: companyName || \"Not provided\",\n      Meeting_Time: meetingTime || \"Not provided\",\n      Context: context || \"New email\",\n      intent_hint: intentHint || \"new_email\",\n      day,\n      text,\n      actual_department: actualDepartment,\n      amount,\n      M_id\n    };\n  } catch (err) {\n    item.json = { error: \"Extraction failed\", msg: err.message };\n  }\n}\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1344,
+        672
+      ],
+      "id": "ad1ddea3-2d73-4f6c-828f-03d9011b0114",
+      "name": "Text Cleaning"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e2a",
+              "name": "Name",
+              "value": "={{ $json.Name }}",
+              "type": "string"
+            },
+            {
+              "id": "e2b",
+              "name": "Phone",
+              "value": "={{ ($json.Phone || '').toString().trim() || 'Not provided' }}",
+              "type": "string"
+            },
+            {
+              "id": "e2c",
+              "name": "Email",
+              "value": "={{ $json.Email }}",
+              "type": "string"
+            },
+            {
+              "id": "e2d",
+              "name": "Message",
+              "value": "={{ $json.Message }}",
+              "type": "string"
+            },
+            {
+              "id": "e2e",
+              "name": "Meeting_Time",
+              "value": "={{ $json.Meeting_Time }}",
+              "type": "string"
+            },
+            {
+              "id": "e2f",
+              "name": "day",
+              "value": "={{ $json.day }}",
+              "type": "string"
+            },
+            {
+              "id": "e2g",
+              "name": "text",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "e2h",
+              "name": "actual_department",
+              "value": "={{ $json.actual_department }}",
+              "type": "string"
+            },
+            {
+              "id": "e2i",
+              "name": "amount",
+              "value": "={{ $json.amount }}",
+              "type": "number"
+            },
+            {
+              "id": "e2j",
+              "name": "Company",
+              "value": "={{ $json.Company }}",
+              "type": "string"
+            },
+            {
+              "id": "e2k",
+              "name": "Context",
+              "value": "={{ $json.intent_hint === 'reply_message' ? ($json.Context || 'No previous context') : 'New email' }}",
+              "type": "string"
+            },
+            {
+              "id": "e2l",
+              "name": "intent_hint",
+              "value": "={{ $json.intent_hint || 'new_email' }}",
+              "type": "string"
+            },
+            {
+              "id": "e66e33c1-7b4c-48e0-9f39-235845c0287f",
+              "name": "M_id",
+              "value": "={{ $json.M_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1136,
+        672
+      ],
+      "id": "0c917d31-ad75-4559-aceb-c52f1583cec4",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "Admin",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Admin"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r2",
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "Accounting",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Accounting"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r3",
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "COO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "COO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r4",
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "CEO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "CEO"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r5",
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "Customer Care",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Customer Care"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "r6",
+                    "leftValue": "={{ $json.text }}",
+                    "rightValue": "Sales",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Sales"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -944,
+        608
+      ],
+      "id": "3a51823a-c31a-4906-925c-6da78f6b7bf7",
+      "name": "Department Routing"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a professional and organized Administrative Assistant at YOUR_COMPANY_NAME, with a strong focus on Digitalisation and operational efficiency.\n\nUser Name: {{ $json.Name }}\nUser Phone: {{ $json.Phone }}\nUser Email: {{ $json.Email }}\nUser Message: {{ $json.Message }}\nMeeting Time: {{ $json.Meeting_Time }}\nPrevious Context: {{ $json.Context }}\nMessage Type: {{ $json.intent_hint }}\n\nWrite a professional plain-text email reply. Address by name. Be structured and clear. No Markdown. No bullets. Short paragraphs only.\n\nEnd the email with this exact signature:\n\nBest regards,\nAdmin Team\nYOUR_COMPANY_NAME",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -240,
+        32
+      ],
+      "id": "8bb3d53c-c4f2-421a-9a69-8193e4bd1b79",
+      "name": "Admin"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        144
+      ],
+      "id": "07b25e9c-999d-4be6-9773-11ce12c3a58d",
+      "name": "OpenAI Chat Model1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an expert and precise Accounting Representative at YOUR_COMPANY_NAME, responsible for handling financial, billing, and payment-related matters with accuracy and professionalism.\n\nUser Name: {{ $json.Name }}\nUser Phone: {{ $json.Phone }}\nUser Email: {{ $json.Email }}\nUser Message: {{ $json.Message }}\nMeeting Time: {{ $json.Meeting_Time }}\nPrevious Context: {{ $json.Context }}\nMessage Type: {{ $json.intent_hint }}\n\nWrite a professional plain-text email reply. Address by name. Be structured and clear. No Markdown. No bullets. Short paragraphs only.\n\nEnd the email with this exact signature:\n\nBest regards,\nAccounting Team\nYOUR_COMPANY_NAME",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -240,
+        400
+      ],
+      "id": "f3a6f9cc-e0a7-4876-93c9-0ac444ff4685",
+      "name": "Accounting"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        512
+      ],
+      "id": "9189f0d7-e0a4-41d2-bd88-d23f7ed16345",
+      "name": "OpenAI Chat Model2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Chief Operations Officer (COO) Assistant at YOUR_COMPANY_NAME, responsible for handling operational, workflow, and process-related inquiries.\n\nUser Name: {{ $json.Name }}\nUser Phone: {{ $json.Phone }}\nUser Email: {{ $json.Email }}\nUser Message: {{ $json.Message }}\nMeeting Time: {{ $json.Meeting_Time }}\nPrevious Context: {{ $json.Context }}\nMessage Type: {{ $json.intent_hint }}\n\nWrite a professional plain-text email reply. Address by name. Be structured and clear. No Markdown. No bullets. Short paragraphs only.\n\nEnd the email with this exact signature:\n\nBest regards,\nOperations Team\nYOUR_COMPANY_NAME",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -240,
+        640
+      ],
+      "id": "211f0074-8286-4439-aba5-9ee43b9c9ef6",
+      "name": "COO"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        752
+      ],
+      "id": "e5a36065-2163-4b03-8973-9c15e8fd2807",
+      "name": "OpenAI Chat Model3"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Executive Assistant to the CEO of YOUR_COMPANY_NAME, responsible for handling high-level strategic, partnership, and leadership-related inquiries.\n\nUser Name: {{ $json.Name }}\nUser Phone: {{ $json.Phone }}\nUser Email: {{ $json.Email }}\nUser Message: {{ $json.Message }}\nMeeting Time: {{ $json.Meeting_Time }}\nPrevious Context: {{ $json.Context }}\n\nWrite a professional plain-text email reply. Address by name. Be structured and clear. No Markdown. No bullets. Short paragraphs only.\n\nEnd the email with this exact signature:\n\nBest regards,\nOffice of the CEO\nYOUR_COMPANY_NAME",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -240,
+        944
+      ],
+      "id": "72c644f1-80bb-4a96-92b3-8b88e196d980",
+      "name": "CEO"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        1056
+      ],
+      "id": "21f6e11d-2c1d-4bce-a356-b81954c50f4a",
+      "name": "OpenAI Chat Model4"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a high-performing Sales Representative and Lead Qualifier at YOUR_COMPANY_NAME.\n\nUser Name: {{ $json.Name }}\nUser Phone: {{ $json.Phone }}\nUser Email: {{ $json.Email }}\nUser Message: {{ $json.Message }}\nMeeting Time: {{ $json.Meeting_Time }}\n\nWrite a VERY SHORT email reply to the customer.\n\nRules:\n- Maximum 2-3 sentences only\n- Thank them for reaching out\n- Confirm we received their request\n- Inform them that our Sales team will contact them soon via email\n- Keep the tone professional, slightly enthusiastic\n\nDo NOT add: email subject, product explanations, long paragraphs, CRM information, lead scoring.\n\nReturn ONLY the email reply. Nothing else.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -240,
+        1552
+      ],
+      "id": "9ddde168-b113-4abf-bfe6-1b09078afcba",
+      "name": "Sales"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        1664
+      ],
+      "id": "8091aefe-e07c-4901-93d7-066753e8a6f4",
+      "name": "OpenAI Chat Model5"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a helpful and professional Customer Care Representative at YOUR_COMPANY_NAME.\n\nUser Name: {{ $json.Name }}\nUser Phone: {{ $json.Phone }}\nUser Email: {{ $json.Email }}\nUser Message: {{ $json.Message }}\nMeeting Time: {{ $json.Meeting_Time }}\nPrevious Context: {{ $json.Context }}\nMessage Type: {{ $json.intent_hint }}\n\nWrite a professional plain-text email reply. Address by name. Be structured and clear. No Markdown. No bullets. Short paragraphs only.\n\nEnd the email with this exact signature:\n\nBest regards,\nCustomer Care Team\nYOUR_COMPANY_NAME",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -240,
+        1216
+      ],
+      "id": "6eceb6ba-9f73-4e34-9491-a7cb7f5e41bf",
+      "name": "Customer Care"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        1328
+      ],
+      "id": "ce13c5d6-0ba4-45bc-ab70-32b2dc4ced1f",
+      "name": "OpenAI Chat Model6"
+    },
+    {
+      "parameters": {
+        "toRecipients": "ceo@YOUR_DOMAIN.com",
+        "subject": "🔥 New Lead Received",
+        "bodyContent": "=A lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\n\nPlease reach out immediately.\n\n— AI Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        224,
+        944
+      ],
+      "id": "15929419-0fb0-4aaf-a5e5-cf7218f18d6d",
+      "name": "Mail to the CEO",
+      "webhookId": "YOUR_WEBHOOK_ID_2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfor (const item of items) {\n  let score = 0;\n  \n  const query = (\n    $('Edit Fields2').item.json.Message ||\n    item.json.Message || \n    item.json.message || \n    \"\"\n  ).toLowerCase();\n\n  const highIntent = [\"buy\",\"purchase\",\"pricing\",\"price\",\"cost\",\"start\",\"subscribe\",\"sign up\",\"get started\"];\n  highIntent.forEach(w => { if (query.includes(w)) score += 50; });\n\n  const demoIntent = [\"demo\",\"trial\",\"interested\",\"try\",\"show me\",\"walkthrough\"];\n  demoIntent.forEach(w => { if (query.includes(w)) score += 40; });\n\n  const midIntent = [\"tell me\",\"about\",\"details\",\"explain\",\"how\",\"what\"];\n  midIntent.forEach(w => { if (query.includes(w)) score += 15; });\n\n  const serviceIntent = [\"service\",\"solution\",\"business\",\"company\",\"process\",\"consultation\"];\n  serviceIntent.forEach(w => { if (query.includes(w)) score += 20; });\n\n  const lowIntent = [\"just checking\",\"hello\",\"hi\",\"info\",\"information\"];\n  lowIntent.forEach(w => { if (query.includes(w)) score -= 5; });\n\n  score = Math.min(Math.max(score, 0), 100);\n\n  let lead_type = \"Cold\";\n  if (score >= 70) lead_type = \"Hot\";\n  else if (score >= 40) lead_type = \"Warm\";\n\n  const is_qualified = score >= 50;\n\n  item.json.lead_score = score;\n  item.json.lead_type = lead_type;\n  item.json.is_qualified = is_qualified;\n  item.json.followup_day = 0;\n  item.json.followup_stopped = false;\n  item.json.followup_client_name = $('Edit Fields2').item.json.Name || item.json.Name || \"Valued Client\";\n  item.json.followup_client_email = $('Edit Fields2').item.json.Email || item.json.Email || \"\";\n  item.json.followup_original_message = $('Edit Fields2').item.json.Message || item.json.Message || \"\";\n}\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1552
+      ],
+      "id": "3aa31241-947d-4754-931f-812b69332c45",
+      "name": "Lead Scoring1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "qc1",
+              "leftValue": "={{ $json.is_qualified }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1136,
+        1552
+      ],
+      "id": "11a4aea6-7330-4ba1-a467-cec44dfe6378",
+      "name": "Qualified Lead Check"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "hl1",
+              "leftValue": "={{ $json.lead_score }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "hl2",
+              "leftValue": "={{ $json.amount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1552,
+        1280
+      ],
+      "id": "98b8147b-479e-406c-8728-a1e1da33c910",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "toRecipients": "sales@YOUR_DOMAIN.com",
+        "subject": "🔥 HOT LEAD ALERT - Immediate Attention Needed",
+        "bodyContent": "=A high-intent lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\nLead Score: {{ $('Lead Scoring1').item.json.lead_score }}\n\nPlease reach out immediately.\n\n— AI Sales Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1968,
+        1056
+      ],
+      "id": "63a7a4c4-5d45-4c55-aff9-f06b488dbb1b",
+      "name": "Hot Lead alert",
+      "webhookId": "YOUR_WEBHOOK_ID_3"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\n\nreturn items.map(item => {\n  const sentTo = $('Edit Fields1').item.json.Email || \"Unknown\";\n  const aiReply = $('Edit Fields2').item.json.Message || \"\";\n\n  return {\n    json: {\n      status: \"Success\",\n      sent_to: sentTo,\n      message_id: \"MSG-\" + Date.now() + \"-\" + Math.floor(Math.random() * 99999),\n      time: new Date().toLocaleString(),\n      User_msg: aiReply\n    }\n  };\n});"
+      },
+      "id": "2d9662c7-2422-4d7d-b2c7-7425c6ae2108",
+      "name": "Workflow Logger",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        672
+      ],
+      "id": "e4d42da6-f16d-45ea-b869-90ab58e61649",
+      "name": "Code in JavaScript",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Visitors Mail Information",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Message ID": "={{ $json.message_id }}",
+            "Sent TO": "={{ $json.sent_to }}",
+            "Status": "={{ $json.status }}",
+            "Time": "={{ $json.time }}",
+            "User_Message": "={{ $json.User_msg }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Message ID",
+              "displayName": "Message ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sent TO",
+              "displayName": "Sent TO",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Time",
+              "displayName": "Time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "User_Message",
+              "displayName": "User_Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2592,
+        672
+      ],
+      "id": "c8f84df0-4046-4c19-8a93-eb5801d90a70",
+      "name": "Append row in sheet"
+    },
+    {
+      "parameters": {
+        "functionCode": "const myEmail = \"YOUR_ASSISTANT_EMAIL@YOUR_DOMAIN.com\";\nconst from = $json.from?.emailAddress?.address || \"\";\nif (from === myEmail) return [];\nreturn [{ json: $json }];"
+      },
+      "id": "3e698e06-baca-4d29-b2e9-c0dee31685e2",
+      "name": "Stop Self Email",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -3936,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6b145cd4-3b64-42f3-8bbf-6639f6c1f286",
+              "leftValue": "={{ $json.subject }}",
+              "rightValue": "=Please take a moment to schedule an appointment",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "f0ee2965-112f-4f28-a085-30eaea80e52d",
+              "leftValue": "={{ $json.subject }}",
+              "rightValue": "Canceled:",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -3696,
+        560
+      ],
+      "id": "e9049ffe-320d-4bd2-af66-ce13271effc2",
+      "name": "Booking Email Check"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_OUTLOOK_FOLDER_ID_ADMIN",
+          "mode": "list",
+          "cachedResultName": "Admin",
+          "cachedResultUrl": "https://outlook.office365.com/mail/YOUR_OUTLOOK_FOLDER_ID_ADMIN"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        704,
+        32
+      ],
+      "id": "b9ffcc17-7b05-4edf-a724-888ac95cd8bc",
+      "name": "Move to Folder — Admin",
+      "webhookId": "YOUR_WEBHOOK_ID_MOVE_ADMIN"
+    },
+    {
+      "parameters": {
+        "toRecipients": "admin@YOUR_DOMAIN.com",
+        "subject": "🔥 New Lead Received",
+        "bodyContent": "=An Admin lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\n\nPlease reach out immediately.\n\n— AI Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        256,
+        32
+      ],
+      "id": "0ce05543-c340-456d-a52d-5d44db9dc90c",
+      "name": "Send Email to the Admin Dept",
+      "webhookId": "YOUR_WEBHOOK_ID_ADMIN_MAIL"
+    },
+    {
+      "parameters": {
+        "toRecipients": "accounting@YOUR_DOMAIN.com",
+        "subject": "🔥 New Lead Received",
+        "bodyContent": "=An Accounting lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\n\nPlease reach out immediately.\n\n— AI Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "id": "2ee6ddcf-c173-4dbb-95da-e6f89b7a58e0",
+      "name": "Send a mail to Accounting Dept",
+      "webhookId": "YOUR_WEBHOOK_ID_ACCOUNTING_MAIL"
+    },
+    {
+      "parameters": {
+        "toRecipients": "coo@YOUR_DOMAIN.com",
+        "subject": "🔥 New Lead Received",
+        "bodyContent": "=A lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\n\nPlease reach out immediately.\n\n— AI Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        640
+      ],
+      "id": "119d51e3-7750-4c67-badf-5a7d60b64494",
+      "name": "Send a mail to COO Department",
+      "webhookId": "YOUR_WEBHOOK_ID_COO_MAIL"
+    },
+    {
+      "parameters": {
+        "toRecipients": "info@YOUR_DOMAIN.com",
+        "subject": "🔥 New Lead Received",
+        "bodyContent": "=A lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\n\nPlease reach out immediately.\n\n— AI Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        224,
+        1216
+      ],
+      "id": "41e0fb52-94eb-4215-8c52-87522b82f194",
+      "name": "Send a Email to Customer Care",
+      "webhookId": "YOUR_WEBHOOK_ID_CC_MAIL"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_OUTLOOK_FOLDER_ID_ACCOUNTING",
+          "mode": "list",
+          "cachedResultName": "Accounting",
+          "cachedResultUrl": "https://outlook.office365.com/mail/YOUR_OUTLOOK_FOLDER_ID_ACCOUNTING"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        704,
+        400
+      ],
+      "id": "759659d4-97d2-4f2a-84ec-8dfb45098435",
+      "name": "Move to Folder — Accounting",
+      "webhookId": "YOUR_WEBHOOK_ID_MOVE_ACCOUNTING"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_OUTLOOK_FOLDER_ID_COO",
+          "mode": "list",
+          "cachedResultName": "COO",
+          "cachedResultUrl": "https://outlook.office365.com/mail/YOUR_OUTLOOK_FOLDER_ID_COO"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        704,
+        640
+      ],
+      "id": "dcc1c867-e559-4cf0-bc7f-da9fd91f9bdb",
+      "name": "Move to Folder — COO",
+      "webhookId": "YOUR_WEBHOOK_ID_MOVE_COO"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_OUTLOOK_FOLDER_ID_CEO",
+          "mode": "list",
+          "cachedResultName": "CEO",
+          "cachedResultUrl": "https://outlook.office365.com/mail/YOUR_OUTLOOK_FOLDER_ID_CEO"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        704,
+        944
+      ],
+      "id": "9441d129-62a0-4dae-ae3f-c7fc5f8b887c",
+      "name": "Move to Folder  - CEO",
+      "webhookId": "YOUR_WEBHOOK_ID_MOVE_CEO"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_OUTLOOK_FOLDER_ID_CUSTOMER_CARE",
+          "mode": "list",
+          "cachedResultName": "Customer Care",
+          "cachedResultUrl": "https://outlook.office365.com/mail/YOUR_OUTLOOK_FOLDER_ID_CUSTOMER_CARE"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        736,
+        1216
+      ],
+      "id": "97e0836a-b718-4981-b208-3cdf31fc80f0",
+      "name": "Move to Folder - Customer Care",
+      "webhookId": "YOUR_WEBHOOK_ID_MOVE_CC"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "contact",
+        "email": "={{ $('Edit Fields2').item.json.Email }}",
+        "additionalFields": {
+          "customPropertiesUi": {
+            "customPropertiesValues": [
+              {
+                "property": "user_query",
+                "value": "={{ $('Edit Fields2').item.json.Message }}"
+              },
+              {
+                "property": "lead_score",
+                "value": "={{ $('Lead Scoring1').item.json.lead_score }}"
+              },
+              {
+                "property": "lead_status",
+                "value": "={{ $('Lead Scoring1').item.json.is_qualified ? 'Qualified' : 'New Lead' }}"
+              },
+              {
+                "property": "meeting_summary",
+                "value": "={{ $('AI Summary Generator').item.json.text }}"
+              }
+            ]
+          },
+          "firstName": "={{ $('Edit Fields2').item.json.Name }}",
+          "phoneNumber": "={{ $('Edit Fields2').item.json.Phone }}"
+        }
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [
+        1968,
+        1568
+      ],
+      "id": "bf19c177-71e3-4c47-ae9f-cd420b29a743",
+      "name": "Create Contact (HubSpot)"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "deal",
+        "operation": "search",
+        "filterGroupsUi": {
+          "filterGroupsValues": [
+            {
+              "filtersUi": {
+                "filterValues": [
+                  {
+                    "propertyName": "dealname",
+                    "value": "={{ $('Text Cleaning').item.json.Name + ' - Sales Lead' }}"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        2160,
+        1568
+      ],
+      "id": "a1f58d98-002f-4c07-afc3-b08896fb053e",
+      "name": "Search for deals",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a20b6518-f4f6-448a-b70c-2d5f66b72852",
+              "leftValue": "={{ ($json.results || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2400,
+        1568
+      ],
+      "id": "2e4673d8-d210-4c99-af66-305bd121c1ec",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "deal",
+        "operation": "update",
+        "dealId": {
+          "__rl": true,
+          "value": "={{ $json.results[0].id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "description": "={{ $('Text Cleaning').item.json.Message }}",
+          "stage": "={{ $('Text Cleaning').item.json.Message?.toLowerCase().includes('consult') ? 'appointmentscheduled' : 'qualifiedtobuy' }}"
+        }
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        2720,
+        1440
+      ],
+      "id": "5067da7c-7047-463f-b5fd-5da2b09aab27",
+      "name": "Update a deal"
+    },
+    {
+      "parameters": {
+        "authentication": "appToken",
+        "resource": "deal",
+        "stage": "qualifiedtobuy",
+        "additionalFields": {
+          "amount": "={{ $('Text Cleaning').item.json.amount || 0 }}",
+          "associatedVids": "={{ $('Create Contact (HubSpot)').item.json.vid }}",
+          "description": "={{ $('AI Summary Generator').item.json.text }}",
+          "dealName": "={{ $('Text Cleaning').item.json.Name }} - Sales Lead",
+          "dealOwner": {
+            "__rl": true,
+            "value": "YOUR_HUBSPOT_OWNER_ID",
+            "mode": "id"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2.2,
+      "position": [
+        2720,
+        1680
+      ],
+      "id": "57511c16-c199-47b5-81d4-e67947151a31",
+      "name": "Create a deal"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $('Edit Fields2').item.json.Email }}",
+        "subject": "We Received Your Request",
+        "bodyContent": "={{ \n\"Hi \" + $('Edit Fields1').item.json.Name + \",\\n\\n\" +\n$('Sales').item.json.text\n.replace(/Best regards[\\s\\S]*/i, \"\")\n.trim()\n.replace(/^(Hi|Hello)?\\s*[^,\\n]+,\\s*/i, \"\")\n.replace(/^./, c => c.toUpperCase())\n+\n\"\\n\\nBest regards,\\nSales Team\\nYOUR_COMPANY_NAME\"\n}}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        1552
+      ],
+      "id": "01f19d4e-817f-4dd9-bb43-6effbad5211d",
+      "name": "Email for Client",
+      "webhookId": "YOUR_WEBHOOK_ID_CLIENT_EMAIL"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3920,
+        1552
+      ],
+      "id": "752b4e4a-b7c9-4dbd-a72e-933f1dfbe719",
+      "name": "Code in JavaScript3",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Visitors Mail Information",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "YOUR_SALES_SHEET_GID",
+          "mode": "list",
+          "cachedResultName": "Sales",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=YOUR_SALES_SHEET_GID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Email": "={{ $('Edit Fields2').item.json.Email }}",
+            "Lead score": "={{ $('Lead Scoring1').item.json.lead_score }}",
+            "Created_At": "={{ new Date().toISOString() }}",
+            "Name": "={{ $('Edit Fields2').item.json.Name }}",
+            "M_Id": "={{ $('Edit Fields2').item.json.M_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead score",
+              "displayName": "Lead score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "M_Id",
+              "displayName": "M_Id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Created_At",
+              "displayName": "Created_At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        4096,
+        1552
+      ],
+      "id": "7f7586e7-5c85-4437-87d3-90f6264e40b2",
+      "name": "Append row in sheet5"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Visitors Mail Information",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "YOUR_FOLLOWUP_SHEET_GID",
+          "mode": "list",
+          "cachedResultName": "follow_up",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=YOUR_FOLLOWUP_SHEET_GID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Email": "={{ $json.Email }}",
+            "1st_msg_date": "={{ $json.Created_At }}",
+            "M_Id": "={{ $('Edit Fields2').item.json.M_id }}",
+            "Name": "={{ $('Edit Fields2').item.json.Name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "M_Id",
+              "displayName": "M_Id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "1st_msg_date",
+              "displayName": "1st_msg_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "1st_followUp",
+              "displayName": "1st_followUp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "2nd_followUp",
+              "displayName": "2nd_followUp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "3rd_followUp",
+              "displayName": "3rd_followUp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        4272,
+        1552
+      ],
+      "id": "d4ae6cdd-20ad-4dcc-baa0-e84003b3ce53",
+      "name": "Append row in sheet2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item;\nconst receivedAt = new Date(item.json[\"receivedDateTime\"] || item.json[\"createdDateTime\"] || 0);\n\nconst todayStart = new Date();\ntodayStart.setHours(0, 0, 0, 0);\n\nif (receivedAt >= todayStart) {\n  return item;\n}\n\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4112,
+        688
+      ],
+      "id": "8fe920dc-fe1d-4986-a3e5-2100f57019ed",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        496,
+        32
+      ],
+      "id": "d66ff900-4a91-437a-9dea-2c64b5065bc0",
+      "name": "Update a message",
+      "webhookId": "YOUR_WEBHOOK_ID_UPDATE_MSG"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        480,
+        400
+      ],
+      "id": "c8488c7a-ef2e-4241-ba60-f01a097ef2b6",
+      "name": "Update a message1",
+      "webhookId": "YOUR_WEBHOOK_ID_UPDATE_MSG"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        464,
+        640
+      ],
+      "id": "b9e3db1b-5e26-436a-be99-ed785510a31e",
+      "name": "Update a message2",
+      "webhookId": "YOUR_WEBHOOK_ID_UPDATE_MSG"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        432,
+        944
+      ],
+      "id": "eca6c5c1-097a-4ce2-9c92-0286ce8d3bda",
+      "name": "Update a message3",
+      "webhookId": "YOUR_WEBHOOK_ID_UPDATE_MSG"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        464,
+        1216
+      ],
+      "id": "148ca19f-367d-4328-b83d-3ba36a3daf5c",
+      "name": "Update a message4",
+      "webhookId": "YOUR_WEBHOOK_ID_UPDATE_MSG"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "isRead": true
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3552,
+        1552
+      ],
+      "id": "d3c80592-28b7-4db7-aa2c-dd4cfa240ff8",
+      "name": "Update a message5",
+      "webhookId": "YOUR_WEBHOOK_ID_UPDATE_MSG"
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Get a message').item.json.id }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_OUTLOOK_FOLDER_ID_SALES",
+          "mode": "list",
+          "cachedResultName": "Sales",
+          "cachedResultUrl": "https://outlook.office365.com/mail/YOUR_OUTLOOK_FOLDER_ID_SALES"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3728,
+        1552
+      ],
+      "id": "be079b6d-b4be-4f34-9a6b-8971eb98f7d2",
+      "name": "Move to Folder - Sales",
+      "webhookId": "YOUR_WEBHOOK_ID_MOVE_SALES",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "toRecipients": "sales@YOUR_DOMAIN.com",
+        "subject": "🔥 LEAD ALERT - Attention Needed",
+        "bodyContent": "=A lead has been detected.\n\nName: {{ $('Edit Fields1').item.json.Name }}\nPhone: {{ $('Edit Fields1').item.json.Phone }}\nEmail: {{ $('Edit Fields1').item.json.Email }}\nQuery: {{ $('Text Cleaning').item.json.Message }}\nLead Score: {{ $('Lead Scoring1').item.json.lead_score }}\n\nPlease reach out immediately.\n\n— AI Sales Assistant | YOUR_COMPANY_NAME",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        1552
+      ],
+      "id": "a4f30468-5302-4f8f-a9cc-f4708ac7e4dc",
+      "name": "Mail to the sales Dept",
+      "webhookId": "YOUR_WEBHOOK_ID_SALES_DEPT_MAIL"
+    },
+    {
+      "parameters": {
+        "content": "# Department ",
+        "height": 2048,
+        "width": 1312,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -416,
+        -224
+      ],
+      "typeVersion": 1,
+      "id": "511a0f6b-560a-4b64-9dc2-b7cb5af97941",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "# Department Routing ",
+        "height": 432,
+        "width": 1008,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2016,
+        512
+      ],
+      "typeVersion": 1,
+      "id": "f3ec17f0-91b1-4189-9865-18bd6fe6105a",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "# Hubspot Integration ",
+        "height": 416,
+        "width": 1376,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1920,
+        1424
+      ],
+      "typeVersion": 1,
+      "id": "cb65158c-4e20-4fef-a0c3-d8718660e29e",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "##  Hot lead ",
+        "height": 240,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1872,
+        976
+      ],
+      "typeVersion": 1,
+      "id": "116a5923-2b99-479a-8fdf-eadd20e32bc4",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "# Lead Scoring ",
+        "height": 272,
+        "width": 368,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        912,
+        1456
+      ],
+      "typeVersion": 1,
+      "id": "3e318ec8-d4a7-415a-8d10-279f18d5727a",
+      "name": "Sticky Note5"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Microsoft Outlook Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "Batch Split — 1 Email Per Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Split — 1 Email Per Item": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Reply": {
+      "main": [
+        [
+          {
+            "node": "Is Reply?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Reply?1": {
+      "main": [
+        [
+          {
+            "node": "Extract data when reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract data from new email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract data when reply": {
+      "main": [
+        [
+          {
+            "node": "Detect Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract data from new email": {
+      "main": [
+        [
+          {
+            "node": "Normalize Email (New)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Intent": {
+      "main": [
+        [
+          {
+            "node": "Human or AI?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Human or AI?": {
+      "main": [
+        [
+          {
+            "node": "Send to Human",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Email (New)1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "AI Summary Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Summary Generator": {
+      "main": [
+        [
+          {
+            "node": "AI Routing Department",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model9": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Summary Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Routing Department": {
+      "main": [
+        [
+          {
+            "node": "Text Cleaning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Routing Department",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Cleaning": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Department Routing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Department Routing": {
+      "main": [
+        [
+          {
+            "node": "Admin",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Accounting",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "COO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CEO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Customer Care",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Admin": {
+      "main": [
+        [
+          {
+            "node": "Send Email to the Admin Dept",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Admin",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accounting": {
+      "main": [
+        [
+          {
+            "node": "Send a mail to Accounting Dept",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Accounting",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "COO": {
+      "main": [
+        [
+          {
+            "node": "Send a mail to COO Department",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "COO",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CEO": {
+      "main": [
+        [
+          {
+            "node": "Mail to the CEO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "CEO",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sales": {
+      "main": [
+        [
+          {
+            "node": "Lead Scoring1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Sales",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Customer Care": {
+      "main": [
+        [
+          {
+            "node": "Send a Email to Customer Care",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model6": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Customer Care",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail to the CEO": {
+      "main": [
+        [
+          {
+            "node": "Update a message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Scoring1": {
+      "main": [
+        [
+          {
+            "node": "Qualified Lead Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualified Lead Check": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Contact (HubSpot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Hot Lead alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Contact (HubSpot)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Contact (HubSpot)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Logger": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Workflow Logger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop Self Email": {
+      "main": [
+        [
+          {
+            "node": "Booking Email Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Email Check": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Detect Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Folder — Admin": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to the Admin Dept": {
+      "main": [
+        [
+          {
+            "node": "Update a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a mail to Accounting Dept": {
+      "main": [
+        [
+          {
+            "node": "Update a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a mail to COO Department": {
+      "main": [
+        [
+          {
+            "node": "Update a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a Email to Customer Care": {
+      "main": [
+        [
+          {
+            "node": "Update a message4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Folder — Accounting": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Folder — COO": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Folder  - CEO": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Folder - Customer Care": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Contact (HubSpot)": {
+      "main": [
+        [
+          {
+            "node": "Search for deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search for deals": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Update a deal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create a deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a deal": {
+      "main": [
+        [
+          {
+            "node": "Email for Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a deal": {
+      "main": [
+        [
+          {
+            "node": "Email for Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email for Client": {
+      "main": [
+        [
+          {
+            "node": "Mail to the sales Dept",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet5": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Stop Self Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a message": {
+      "main": [
+        [
+          {
+            "node": "Move to Folder — Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a message1": {
+      "main": [
+        [
+          {
+            "node": "Move to Folder — Accounting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a message2": {
+      "main": [
+        [
+          {
+            "node": "Move to Folder — COO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a message3": {
+      "main": [
+        [
+          {
+            "node": "Move to Folder  - CEO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a message4": {
+      "main": [
+        [
+          {
+            "node": "Move to Folder - Customer Care",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a message5": {
+      "main": [
+        [
+          {
+            "node": "Move to Folder - Sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move to Folder - Sales": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail to the sales Dept": {
+      "main": [
+        [
+          {
+            "node": "Update a message5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "1ab1d35b-4799-4df3-866b-7bc8ce5e215e",
+  "meta": {
+    "instanceId": "fc37c003c91c4b75bf2cf0ed7a5020e534af71a767a8f8661376b5d3df8851fd"
+  },
+  "id": "gv4YDisvjb364CZH",
+  "tags": []
+}
