@@ -49,8 +49,8 @@
       "webhookId": "YOUR_WEBHOOK_ID_1",
       "credentials": {
         "microsoftOutlookOAuth2Api": {
-          "id": "OQHJbKGR7zUzhRir",
-          "name": "Tom Last"
+          "id": "outlookid_r",
+          "name": "Your Profile"
         }
       }
     },
