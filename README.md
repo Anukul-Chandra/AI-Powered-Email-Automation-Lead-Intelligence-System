@@ -50,7 +50,7 @@ An end-to-end **AI-native n8n automation** that intercepts every inbound email, 
 
 ## 🏗️ System Architecture
 
-```
+``````
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        MICROSOFT OUTLOOK TRIGGER                        │
 │                    (Polls every 60 seconds for new mail)                │
@@ -96,40 +96,49 @@ An end-to-end **AI-native n8n automation** that intercepts every inbound email, 
                     │      ROUTER          │
                     └──────────┬───────────┘
                                │
-          ┌────────────────────┼─────────────────────┐──────────────┐
-          ▼        ▼           ▼         ▼           ▼          ▼
-       ADMIN   ACCOUNTING    COO        CEO         SALES    CUSTOMER
-          │        │           │         │            │         CARE
-          │        │           │         │            │            │
-          └────────┴───────────┴─────────┘            │            │
-                        │                             │            │
-               ┌────────┴────────┐                    ▼            │
-               │ AI Reply Draft  │            ┌──────────────┐     │
-               │ Staff Alert     │            │ LEAD SCORING │     │
-               │ Folder Move     │            │   (0-100)    │     │
-               │ Mark Read       │            └──────┬───────┘     │
-               └─────────────────┘                  │              │
-                                            ┌───────┴────────┐     │
-                                            │  Hot >= 70?    │     │
-                                            │  Warm >= 40?   │     │
-                                            │  Cold  < 40?   │     │
-                                            └───────┬────────┘     │
-                                                    │              │
-                                          ┌─────────┴──────────┐   │
-                                          │   HUBSPOT CRM SYNC │   │
-                                          │  Contact + Deal    │   │
-                                          │  Pipeline Stage    │   │
-                                          └─────────┬──────────┘   │
-                                                    │              │
-                                          ┌─────────┴──────────┐   │
-                                          │  CLIENT EMAIL SENT │ ◄─┘
-                                          └─────────┬──────────┘
-                                                    │
-                                          ┌─────────▼──────────┐
-                                          │  GOOGLE SHEETS LOG │
-                                          │  (3 tabs tracked)  │
-                                          └────────────────────┘
-```
+          ┌──────────┬─────────┼─────────┬──────────┬────────────────────┐
+          ▼          ▼         ▼         ▼          ▼                    ▼
+       ADMIN    ACCOUNTING    COO       CEO    CUSTOMER                SALES
+                                               CARE
+          │          │         │         │        │                      │
+          └──────────┴─────────┴─────────┴────────┘                      │
+                               │                                         │
+                ┌──────────────▼──────────────┐                          │
+                │      AI Reply Draft         │                          │
+                │      Staff Alert            │                          │
+                │      Folder Move            │                          │
+                │      Mark Read              │                          │
+                └──────────────┬──────────────┘                          │
+                               │                                         │
+                               │               ┌────────────────────┐    │
+                               │               │   LEAD SCORING     │◄───┘
+                               │               │     (0 – 100)      │
+                               │               └────────┬───────────┘
+                               │                        │
+                               │               ┌────────▼───────────┐
+                               │               │    Hot  ≥ 70?      │
+                               │               │    Warm ≥ 40?      │
+                               │               │    Cold  < 40?     │
+                               │               └────────┬───────────┘
+                               │                        │
+                               │               ┌────────▼───────────┐
+                               │               │  HUBSPOT CRM SYNC  │
+                               │               │  Contact + Deal    │
+                               │               │  Pipeline Stage    │
+                               │               └────────┬───────────┘
+                               │                        │
+                               └───────────┬────────────┘
+                                           │
+                               ┌───────────▼───────────┐
+                               │   CLIENT EMAIL SENT   │
+                               └───────────┬───────────┘
+                                           │
+                               ┌───────────▼───────────┐
+                               │  GOOGLE SHEETS LOG    │
+                               │   (3 tabs tracked)    │
+                               └───────────────────────┘
+
+
 
 ---
 
